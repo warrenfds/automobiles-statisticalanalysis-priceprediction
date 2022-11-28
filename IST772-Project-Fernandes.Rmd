@@ -1,0 +1,314 @@
+---
+title: "IST 772 Project"
+author: "Warren Fernandes"
+date: "12/10/2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Diagnostics
+
+```{r getdata}
+# Loading required libraries
+library(tidyverse)
+library(imputeTS)
+library(dplyr)
+library(BayesFactor)
+library(RColorBrewer)
+# Change the setwd() to where you have stored the data set
+#setwd("~/Desktop/Week11772")
+
+autoData <- read_csv("Automobile_data.csv")
+summary(autoData)
+str(autoData)
+```
+## Data Set Information:
+
+This data set consists of three types of entities: (a) the specification of an auto in terms of various characteristics, (b) its assigned insurance risk rating, (c) its normalized losses in use as compared to other cars. The second rating corresponds to the degree to which the auto is more risky than its price indicates. Cars are initially assigned a risk factor symbol associated with its price. Then, if it is more risky (or less), this symbol is adjusted by moving it up (or down) the scale. Actuarians call this process "symboling". A value of +3 indicates that the auto is risky, -3 that it is probably pretty safe.
+
+Attributes -
+
+1. symboling: -3, -2, -1, 0, 1, 2, 3.
+2. normalized-losses: continuous from 65 to 256.
+3. make: alfa-romero, audi, bmw, chevrolet, dodge, honda,
+isuzu, jaguar, mazda, mercedes-benz, mercury,
+mitsubishi, nissan, peugot, plymouth, porsche,
+renault, saab, subaru, toyota, volkswagen, volvo
+4. fuel-type: diesel, gas.
+5. aspiration: std, turbo.
+6. num-of-doors: four, two.
+7. body-style: hardtop, wagon, sedan, hatchback, convertible.
+8. drive-wheels: 4wd, fwd, rwd.
+9. engine-location: front, rear.
+10. wheel-base: continuous from 86.6 120.9.
+11. length: continuous from 141.1 to 208.1.
+12. width: continuous from 60.3 to 72.3.
+13. height: continuous from 47.8 to 59.8.
+14. curb-weight: continuous from 1488 to 4066.
+15. engine-type: dohc, dohcv, l, ohc, ohcf, ohcv, rotor.
+16. num-of-cylinders: eight, five, four, six, three, twelve, two.
+17. engine-size: continuous from 61 to 326.
+18. fuel-system: 1bbl, 2bbl, 4bbl, idi, mfi, mpfi, spdi, spfi.
+19. bore: continuous from 2.54 to 3.94.
+20. stroke: continuous from 2.07 to 4.17.
+21. compression-ratio: continuous from 7 to 23.
+22. horsepower: continuous from 48 to 288.
+23. peak-rpm: continuous from 4150 to 6600.
+24. city-mpg: continuous from 13 to 49.
+25. highway-mpg: continuous from 16 to 54.
+26. price: continuous from 5118 to 45400.
+
+
+```{r preprocess}
+# Checking for NA values
+sapply(autoData, function(x) sum(is.na(x)))
+# There seem to be no NA values so let's look at the data to find missing values. 
+#View(autoData)
+autoData <- autoData %>% mutate_all(~replace(., . == '?', NA))
+head(autoData)
+# Missing values with '?' value have been replaced by NA.
+
+sapply(autoData, function(x) sum(is.na(x)))
+# We won't be using symboling and mormalized-losses data for our statistical analysis. The summary information on different cars would ideally provide enough attributes for a thorough staistical analysis. The rest of the NA values will be filled using interpolation. 
+```
+
+```{r data processing}
+drop_cols <-  c('symboling', 'normalized-losses')
+autoData <- autoData[,!(names(autoData) %in% drop_cols)]
+head(autoData,10)
+# Setting character variables to either factors or numeric variables
+factor_cols <- c('fuel-type', 'aspiration', 'num-of-doors',  'body-style', 'drive-wheels', 'engine-location', 'engine-type', 'num-of-cylinders', 'fuel-system')
+autoData[factor_cols] <- lapply(autoData[factor_cols], as.factor)  
+
+num_cols <- c('bore', 'stroke', 'horsepower', 'peak-rpm', 'price')
+autoData[num_cols] <- lapply(autoData[num_cols], as.numeric)  
+
+str(autoData)
+```
+After processing the data, we replace the NA values before moving on to the analysis
+```{r}
+# Dealing with NA values 
+autoData$bore <- na_interpolation(autoData$bore)
+autoData$stroke <- na_interpolation(autoData$stroke)
+autoData$horsepower <- na_interpolation(autoData$horsepower)
+autoData$`peak-rpm` <- na_interpolation(autoData$`peak-rpm`)
+autoData$price <- na_interpolation(autoData$price)
+autoData$`num-of-doors` <- autoData$`num-of-doors` %>% replace_na("four")
+# The NA value is for sedan cars which mostly have four doors.
+sapply(autoData, function(x) sum(is.na(x)))
+View(autoData)
+# There are no missing values in our numeric variables now. 
+
+```
+
+
+## EDA
+```{r}
+table(autoData$`fuel-type`)
+
+ggplot(autoData, aes(x=`fuel-type`, y=price, fill=`fuel-type`)) + geom_boxplot(alpha=0.3) + scale_fill_brewer(palette="Dark2")
+       
+# Mean price of gas is less than the mean price of diesel.There are many outliers for gas prices above $30000.
+#The lowest value of diesel is slightly less than $10000 whereas the highest value of diesel is approximately $30000. The lowest value of gas is less than $10000 whereas he highest value of diesel is approximately $25000
+
+ggplot(autoData, aes(x=aspiration, y=price, fill=aspiration)) + geom_boxplot(alpha=0.3) + scale_fill_brewer(palette="Set1")
+# Mean price of std is approximately 10000 whereas the mean price of turbo is approxmately $15000 i.e. std is cheaper than turbo. The lowest price of std is less than $10000 and highest value is approximately $25000. There are many outliers for values greater than 30000. The lowest price of turbo is less than $10000 and the highest value of turbo is less than $30000
+
+ggplot(autoData, aes(x=`num-of-doors`, y=price, fill=`num-of-doors`)) + geom_boxplot(alpha=0.3) + scale_fill_brewer(palette="Set3")
+# Mean price of 4 no. of doors is slightly greater than 2 doors. The lowest value of 4 no. of doors is slightly less than $10000 and the highest value of 4 no. of doors is slightly less than $30000. There are outliers present after the range of $30000. The lowest range of 2 no. of doors is very less than $10000 and the highest range of 2 no. of doors is approximately the same value as 4 no. of doors. The range of the outliers for the doors are almost similar like the 4. no of doors
+
+ggplot(autoData, aes(x=`body-style`, y=price, fill=`body-style`)) + geom_boxplot(alpha=0.3) + scale_fill_brewer(palette="Dark2")
+#mean price of hatchback is found to be the least whereas the mean price of hardtop is found to be the highest. The lowest value is less than $10000(hatchback) whereas the highest value is greater than $40000(hardtop).
+
+
+hist(autoData$price) # The distribution of the price of the cars is right-skewed. 
+hist(autoData$horsepower) # distribution of the horsepower of cars is right-skewed.
+hist(autoData$`peak-rpm`) #distribution of the peak-rpm of the cars is normal distribution
+
+# Average sale prices of cars by brand
+avgbymake <- autoData%>% group_by(make) %>% summarise(mean = mean(price))
+ggplot(avgbymake, aes(x = make, y = mean, fill = make)) + geom_bar(stat = "identity", position = "dodge") + coord_flip() + scale_colour_gradientn(colours=rainbow(4)) + labs(title = "Average Car Price by Brand", y= "Average price", x="Brand")
+# Mercedes-Benz, Jaguar, Porsche and BMW are the only four brands with average car prices over $25,000. 
+
+# Density plot of car price
+plot(density(autoData$price), xlab='Price', main ="Density Plot of Car Price")
+#Density plot of car horsepower
+plot(density(autoData$horsepower), xlab='Horsepower', main ="Density Plot of Car Horsepower")
+```
+
+## Correlation between variables
+```{r corr}
+library(corrplot)
+library(xtable)
+numData <- select_if(autoData, is.numeric)
+M <- round(cor(numData),2)
+M
+par(mfrow = c(1,1))
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+corrplot(M, method="color", col=col(100),  
+         type="upper", order="hclust", 
+         addCoef.col = "black", # Add coefficient of correlation
+         tl.col="black", tl.srt=45, tl.cex = 0.75, #Text label color and rotation
+         diag=FALSE 
+         )
+# Please use the show in new window option to view the correlation matrix values correctly.
+
+# The outcome varaible price has the highest correlation with curb weight and engine size. The correlation coeeficient is 0.84 and 0.87 for the same respectively. There is strong negative correlation between price and cit-mpg and highway-mpg. This indicates that those variables might have to be inverse transformed for use in the models ahead. 
+```
+
+## t-test and Hypothesis testing
+```{r t-test}
+# Is there a significant difference between the mean values of the city mileage of a car and the highway mileage of a car?
+
+t.test(autoData$`city-mpg`, autoData$`highway-mpg`)
+# We conduct a t-test to compare the mean values of the mileage of a car in the city vs on the highway. The t-test gives us a result proving that there is a difference in the average mileage of car in the city vs the highway. The difference has a 95% confidence interval from -6.84 to -4.22 which indicates that highway mileage is better than city mileage on an average by 4 to 7 miles per gallon. 
+# The p-value indicates that the test is significant and we reject the Null hypothesis that the difference in means is equal to 0. 
+
+# Does average price of cars change because of the type of fuel or the aspiration of the engine?
+
+t.test(autoData$price[autoData$`fuel-type`=='gas'], autoData$price[autoData$`fuel-type`=='diesel'])
+# The result of the t-test comparing the price of cars which use gas vs diesel shows that there might be a credible difference. From the data, we know that we have very few observations with diesel fuel type. The results of this test are not significant based on the p-value. We fail to reject the Null hypothesis. 
+
+t.test(autoData$price[autoData$aspiration =='std'], autoData$price[autoData$aspiration =='turbo'])
+# The result of the t-test comparing the price of cars which have standard aspiration vs turbo aspiration shows that there might be a credible difference. The p-value of 0.0020 is significant at a standard alpha value of 0.05 and it means there is a significant difference between the average price of cars of the two groups.
+
+```
+
+## Chi-Squared Test
+```{r Chi-sq}
+ch1 <- table(autoData$`num-of-doors`, autoData$`engine-location`)
+ch2 <- table(autoData$`body-style`, autoData$aspiration)
+ch3 <- table(autoData$`num-of-cylinders`, autoData$aspiration)
+chOut <- chisq.test(ch1, correct=FALSE)
+chOut1 <- chisq.test(ch2, correct=FALSE)
+chOut2 <- chisq.test(ch3, correct=FALSE)
+
+chOut
+#The reported value of chi-square, 3.90 on one degree of freedom, has a low corresponding p-value 0.04, which is   just below the standard alpha level of p < 0.05. Thus we reject the null hypothesis of independence between number of doors and location of the engine.
+
+chOut1
+# The p-value of 0.8093 is not significant and we fail to reject the null hypothesis of independence between body style and aspiration. 
+
+chOut2
+#The reported value of chi-square, 13.86 on 6 degrees of freedom, has a low corresponding p-value 0.03, which is  below the standard alpha level of p < 0.05. Thus we reject the null hypothesis of independence between number of cylinders and aspiration of the engine. 
+
+chOut$residuals # There are no particularly large residuals for this Chi-squared test. Largest two values are two and four doors with rear engine location.
+chOut1$residuals # No large residuals here too. Largest here is turbo and convertible.
+chOut2$residuals # Largest residual is turbo aspiration with five cylinder engine.
+
+```
+
+
+## Multiple Linear Regression Models
+```{r lm}
+# 3 highest correlated variables
+lm1 <- lm(price~horsepower+`curb-weight`+`engine-size`, data = autoData) 
+summary(lm1)
+# Adjusted R-squared value is 0.7958
+
+lm2 <- lm(price~horsepower+`curb-weight`+`engine-size`+`city-mpg`+`highway-mpg`, data = autoData)
+summary(lm2)
+# Adjusted R-squared value is 0.7949
+
+lm3 <- lm(price~`city-mpg`+`highway-mpg`, data = autoData)
+summary(lm3)
+# Adjusted R-squared value is 0.4893. This shows that a model with just these variables is not such a good model. 
+
+# 5 highest correlated variables
+lm4 <- lm(price~horsepower+`curb-weight`+`engine-size`+width+length, data = autoData) 
+summary(lm4)
+# Adjusted R-squared value is 0.7977
+
+lm1BF <- lmBF(price~horsepower+`curb-weight`+`engine-size`, data = autoData)
+summary(lm1BF)
+# The Bayes factor linear model summary gives an odds ratio that is highly in favor of the alternate hypothesis that having horsepower, curb weight and engine size as predictors of the price of the car is significant. We fail to reject the bull hypothesis. The linear regression model output gives an adjusted R-squared of 0.7958. This means that the model accounts for almost 80% of variability in the price of the car.
+
+# The addition of the variables city-mpg and highway-mpg causes a decrease in the adjusted R-squared score.  Hence, these variables should not be included for the best possible model. 
+
+lm4BF <- lmBF(price~horsepower+`curb-weight`+`engine-size`+width+length, data = autoData) 
+summary(lm4BF)
+# The Bayes factor linear model summary gives an odds ratio that is highly in favor of the alternate hypothesis that having horsepower, curb weight and engine size as predictors of the price of the car is significant. We fail to reject the bull hypothesis. The linear regression model output gives an adjusted R-squared of 0.7977. This means that the model accounts for almost 80% of variability in the price of the car. 
+# This is slightly higher than the model using only the top 3 highest correlated variables to predict the price. As we can see from the model, the width and lenght variables are mot significant. 
+
+lm3BF <- lmBF(price~`city-mpg`+`highway-mpg`, data = autoData)
+summary(lm3BF)
+# The Bayes Factor linear model shows an odds ratio highly in favor of the alternaitve hypotheis that having city-mpg and highway-mpg variables to help predict the price of a car is signigicant. This means that we fail to reject the null hypothesis. Based on the linear regression model output, we can conclude that there is not sufficient evidence to prove that the inclusion of city-mpg and highway-mpg in our model accounts for more variability of the price variable. 
+```
+## AOV
+```{r aov}
+# Are the factors of groups like body style i.e. convertible, sedan, hatchback, etc., aspiration, engine location, or type of wheel drive sampled from the same population?
+
+aov1 <- aov(price~`body-style`, data = autoData)
+summary(aov1)
+
+aov2 <- aov(price~`drive-wheels`+aspiration, data = autoData)
+summary(aov2)
+
+aov3 <- aov(price~aspiration+`body-style`+`engine-location`, data = autoData)
+summary(aov3)
+
+AOVBayesOut <- anovaBF(price~`body-style`, data = autoData)
+summary(AOVBayesOut)
+
+ # Show the range of values for the grand mean
+
+# The Pr(>F) values for all three ANOVA tests were significant which means the variable body-style i.e., convertible,hatchback,sedan and the variable drive-wheels i.e., whether the car is rear/front wheel drive or 4 wheel drive, makes a significant difference on the determning the price of the car. 
+# The F-value were significantly greater than 1, which means that the tests were significant and the means of the car price for the groups differ from each other.  
+
+# The Bayes analysis using ANOVA gave us an odds ratio of 3416:1 in favor of the alternate hypothesis, which is a very strong result according to the rule of thumb.  This result confirms our previous evidence suggesting support for an alternative hypothesis of credible differences among these means of the body style groups. 
+```
+
+## GLM Output - Transformed Predictor 
+
+```{r glmrerun, echo=TRUE}
+glmOut <- glm(formula = aspiration ~ horsepower, 
+              family = binomial(link="logit"), 
+              data = autoData)
+summary(glmOut)
+confint(glmOut)
+exp(confint(glmOut))
+
+# The results are not intuitive. 
+# Logistic regression might not be the ideal test for these variables and the dataset.
+```
+```{r}
+glmOut2 <- glm(formula = `engine-location` ~ horsepower, 
+              family = binomial(link="logit"), 
+              data = autoData)
+summary(glmOut2)
+confint(glmOut2)
+exp(confint(glmOut2))
+
+# The secong model is a bit more intuitive. The 95% credible interval is still extremely small. 
+# The AIC of the model is 23.275. The variables are significant for the logistic regression model. 
+```
+## Pseudo-Rsquared values
+```{r pseudoRsquared, echo=TRUE}
+library(DescTools)
+PseudoR2(glmOut, which="Nagelkerke")
+PseudoR2(glmOut2, which="Nagelkerke")
+# The Pseudo R squared value of 0.0712 is pretty low. It indicates that the horsepower can account for only 7% variation in the aspiration of a car. 
+# The Pseudo R squared value of 0.3782 is a decent value. It indicates 37% variability in engine location because of the horsepower value of a car. 
+```
+
+## Conclusion
+
+1. There was a significant difference in the average mileage of a car in the city versus on the highway. The average price of a car with standard aspirated engine versus turbo aspirated engine also showed a significant difference. 
+
+2. The number of doors in a car and the location of the engine were dependent on each other. The number of cylinders and aspiration of the engine were also variables that were dependent on each other. \
+
+3. The top three highest correlated variables i.e., curb weight, engine size and horsepower were the best to predict the price of a car. Adding the two largest negatively correlated variables did not improve the model but rather decreased the R-squared value of the model by a bit. If the top five highest correlated variables are considered in the model, the adjusted R-squared value increased by a negligible amount and those additional varaibles did not show a significant p-value anyway.
+
+4. The ANOVA tests answered our questions regarding the difference in the mean price of the car for different groups. Factors like body-style, type of wheel drive, enine aspiration and  engine location showed a significant difference in the average car prices. 
+
+5. The logistic regression models did not yield intuitive results for this dataset. There was no significant result for prediciting aspiration type or engine location using the variable horsepower. At most, the model could account for 37% variability of the dependent variable. 
+
+
+
+
